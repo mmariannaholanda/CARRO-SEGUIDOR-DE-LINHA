@@ -1,0 +1,167 @@
+#include <QTRSensors.h>
+
+// ====================================================================
+// 1. CONFIGURAÇÃO DE PINOS (Hardware)
+// ====================================================================
+#define NUM_SENSORS 8
+// Pinos analógicos (ADC1 do ESP32 para não conflitar com funções internas)
+const uint8_t QTR_PINS[NUM_SENSORS] = {36, 39, 34, 35, 32, 33, 25, 26}; 
+
+// Driver de Motor TB6612FNG
+#define PIN_AIN1 12   // Direção Motor Esquerdo
+#define PIN_AIN2 13   // Direção Motor Esquerdo
+#define PIN_PWMA 14   // Velocidade Motor Esquerdo
+
+#define PIN_BIN1 27   // Direção Motor Direito
+#define PIN_BIN2 25   // Direção Motor Direito (Ajustado pino corrigido)
+#define PIN_PWMB 21   // Velocidade Motor Direito
+
+#define PIN_STBY 19   // Standby (Ativa o Driver)
+
+// ====================================================================
+// 2. CONFIGURAÇÕES DE PERFORMANCE & SEGURANÇA
+// ====================================================================
+// Configuração do PWM Nativo do ESP32 (Frequência alta evita zumbido nos motores)
+const int PWM_FREQ = 20000; // 20kHz - Alta frequência para resposta imediata
+const int PWM_RES  = 8;     // Resolução de 8 bits (Valores de 0 a 255)
+const int CH_ESQUERDO = 0;  // Canal PWM interno 0
+const int CH_DIREITO  = 1;  // Canal PWM interno 1
+
+// Controle de Tensão (Proteção para Motores de 6V com Bateria de 7.2V)
+// 200 de 255 limita a saída em ~78%, aplicando no máximo ~5.8V a 6.2V nos motores.
+const int LIMITE_PWM_MAXIMO = 200; 
+
+// Velocidades de Corrida (Ajuste conforme a aderência da pista)
+const int VELOCIDADE_BASE   = 140; // Velocidade padrão nas retas
+const int VELOCIDADE_MINIMA = -50; // Permite o motor de dentro "morder" para trás em curvas fechadas (Frenagem)
+
+// ====================================================================
+// 3. CONSTANTES DO PID (Ajuste fino na pista)
+// ====================================================================
+float Kp = 0.05;    // Força da correção imediata (proporcional ao erro)
+float Ki = 0.0001;  // Correção de desvios longos acumulados
+float Kd = 0.35;    // Amortecimento (previne que o robô passe do ponto e sangre na curva)
+
+// Variáveis de controle do algoritmo
+int ultimoErro = 0;
+long integral = 0;
+
+// Inicialização dos objetos das bibliotecas
+QTRSensors qtr;
+unsigned int valoresSensores[NUM_SENSORS];
+
+// ====================================================================
+// SETUP: Inicialização do Sistema
+// ====================================================================
+void setup() {
+  Serial.begin(115200);
+
+  // Configura os pinos de controle do Driver como Saída
+  pinMode(PIN_AIN1, OUTPUT);
+  pinMode(PIN_AIN2, OUTPUT);
+  pinMode(PIN_BIN1, OUTPUT);
+  pinMode(PIN_BIN2, OUTPUT);
+  pinMode(PIN_STBY, OUTPUT);
+  
+  digitalWrite(PIN_STBY, HIGH); // Liga o driver de motores
+
+  // Configura as propriedades do PWM no ESP32
+  ledcSetup(CH_ESQUERDO, PWM_FREQ, PWM_RES);
+  ledcSetup(CH_DIREITO, PWM_FREQ, PWM_RES);
+  
+  // Vincula os pinos físicos aos canais de PWM configurados
+  ledcAttachPin(PIN_PWMA, CH_ESQUERDO);
+  ledcAttachPin(PIN_PWMB, CH_DIREITO);
+
+  // Configura o tipo de sensor (Analógico) e os pinos correspondentes
+  qtr.setTypeAnalog();
+  qtr.setSensorPins(QTR_PINS, NUM_SENSORS);
+
+  // --- MODO DE CALIBRAÇÃO DE COMPETIÇÃO ---
+  // Durante estes 5 segundos, passe o robô manualmente de um lado para o outro sobre a linha
+  Serial.println(">>> CALIBRANDO... Movimente o robô lateralmente sobre a linha! <<<");
+  for (uint16_t i = 0; i < 400; i++) {
+    qtr.calibrate();
+    delay(10);
+  }
+  Serial.println(">>> Calibração Concluída! Pronto para alinhar na largada. <<<");
+  delay(3000); // Janela de 3 segundos para você colocar o robô na pista antes de correr
+}
+
+// ====================================================================
+// LOOP PRINCIPAL: Execução em Alta Velocidade
+// ====================================================================
+void loop() {
+  // Lê a posição exata da linha. Centro ideal = 3500 (Varia de 0 a 7000)
+  // Caso a pista seja linha BRANCA no fundo PRETO, mude para: qtr.readLineWhite(valoresSensores);
+  uint16_t posicaoDaLinha = qtr.readLineBlack(valoresSensores);
+
+  // Calcula o erro em relação ao centro (0 = Perfeitamente centralizado)
+  int erro = posicaoDaLinha - 3500;
+
+  // --- CÁLCULO DO PID ---
+  // Parte Proporcional: Erro atual
+  float P = erro;
+  
+  // Parte Integral: Acúmulo do erro (com trava anti-windup para não bugar em curvas longas)
+  integral += erro;
+  integral = constrain(integral, -2000, 2000); 
+  float I = integral;
+
+  // Parte Derivativa: Velocidade de mudança do erro (antecipa a curva)
+  float D = erro - ultimoErro;
+  ultimoErro = erro;
+
+  // Sinal de Controle Final (Soma ponderada)
+  int sinalControle = (Kp * P) + (Ki * I) + (Kd * D);
+
+  // --- SINAL DE CONTROLE COMPENSADO ---
+  // Aplica o sinal de controle de forma diferencial nos motores
+  int velMotorEsquerdo = VELOCIDADE_BASE + sinalControle;
+  int velMotorDireito  = VELOCIDADE_BASE - sinalControle;
+
+  // --- SISTEMA DE FRENAGEM DINÂMICA (Essencial para Competição) ---
+  // Se o erro for muito brutal (o robô está quase saindo da pista),
+  // reduzimos a velocidade base para segurar o robô dentro do circuito.
+  if (abs(erro) > 2500) {
+    velMotorEsquerdo -= 30;
+    velMotorDireito  -= 30;
+  }
+
+  // Restringe as velocidades dentro dos limites seguros do hardware e software
+  velMotorEsquerdo = constrain(velMotorEsquerdo, VELOCIDADE_MINIMA, LIMITE_PWM_MAXIMO);
+  velMotorDireito  = constrain(velMotorDireito, VELOCIDADE_MINIMA, LIMITE_PWM_MAXIMO);
+
+  // Envia os comandos finais de potência para os motores
+  controlarMotores(velMotorEsquerdo, velMotorDireito);
+}
+
+// ====================================================================
+// CONTROLAR MOTORES: Gerencia Sentido e Potência (Ponte H TB6612FNG)
+// ====================================================================
+void controlarMotores(int potenciaEsquerda, int potenciaDireita) {
+  
+  // Controle do Motor Esquerdo (Canal A)
+  if (potenciaEsquerda >= 0) {
+    digitalWrite(PIN_AIN1, HIGH);
+    digitalWrite(PIN_AIN2, LOW);
+    ledcWrite(CH_ESQUERDO, potenciaEsquerda);
+  } else {
+    // Se a potência for negativa, faz o motor girar ao contrário (Freio Ativo de curva)
+    digitalWrite(PIN_AIN1, LOW);
+    digitalWrite(PIN_AIN2, HIGH);
+    ledcWrite(CH_ESQUERDO, abs(potenciaEsquerda));
+  }
+
+  // Controle do Motor Direito (Canal B)
+  if (potenciaDireita >= 0) {
+    digitalWrite(PIN_BIN1, HIGH);
+    digitalWrite(PIN_BIN2, LOW);
+    ledcWrite(CH_DIREITO, potenciaDireita);
+  } else {
+    // Se a potência for negativa, faz o motor girar ao contrário (Freio Ativo de curva)
+    digitalWrite(PIN_BIN1, LOW);
+    digitalWrite(PIN_BIN2, HIGH);
+    ledcWrite(CH_DIREITO, abs(potenciaDireita));
+  }
+}
