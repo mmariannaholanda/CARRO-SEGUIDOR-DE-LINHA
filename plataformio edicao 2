@@ -1,0 +1,13 @@
+[env:nodemcu-32s]
+platform = espressif32
+board = nodemcu-32s
+framework = arduino
+
+lib_deps = 
+    pololu/QTRSensors
+
+monitor_speed = 115200
+build_flags = -O2
+
+; Remove avisos do LED_BUILTIN
+build_unflags = -DLED_BUILTIN
