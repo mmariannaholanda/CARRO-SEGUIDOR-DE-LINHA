@@ -1,13 +1,3 @@
-/*
- * =====================================================================
- * ROBÔ LARI — SEGUIDOR DE LINHA COMPETIÇÃO  v5.4 (OTIMIZADO)
- * MCU:     NodeMCU ESP32-WROOM-32
- * Driver:  TB6612FNG
- * Sensor:  QTR-8A (analógico, 8 sensores)
- * Motor:   N20 6V 1000rpm
- * Bat.:    2x 18650 Li-ion série → 7.4V nominal
- * =====================================================================
- */
 
 #include <Arduino.h>
 #include <QTRSensors.h>
@@ -15,9 +5,9 @@
 // Descomente a linha abaixo se quiser ajustar via Monitor Serial
 // #define MODO_DEBUG
 
-// ====================================================================
+
 // 1. PINOS
-// ====================================================================
+
 #define NUM_SENSORS 8
 const uint8_t QTR_PINS[NUM_SENSORS] = {32, 33, 34, 35, 36, 39, 25, 26};
 #define PIN_LEDON 13
@@ -30,36 +20,31 @@ const uint8_t QTR_PINS[NUM_SENSORS] = {32, 33, 34, 35, 36, 39, 25, 26};
 #define PIN_PWMB 23
 #define PIN_STBY 14
 
-// ====================================================================
+
 // 2. PWM (Configuração ESP32)
-// ====================================================================
+
 const int PWM_FREQ    = 5000;
 const int PWM_RES     = 8;
 const int CH_ESQUERDO = 0;
 const int CH_DIREITO  = 1;
 
-// ====================================================================
+
 // 3. VELOCIDADES
-// ====================================================================
+
 const int PWM_MAX         = 255;   
 const int VELOCIDADE_BASE = 230;
 const int VEL_MIN_CURVA   = -160;
 
 
-
-
 int leftTrim  = 0;
 int rightTrim = 0;
 
-// ====================================================================
+
 // 4. PID OTIMIZADO PARA EVITAR RUIDO DO ADC DO ESP32
-// ====================================================================
+
 float Kp = 0.085f;
 float Ki = 0.0000f;
 float Kd = 0.38f;
-
-
-
 
 
 float ultimoErro = 0.0f;
@@ -70,24 +55,24 @@ const float INTEGRAL_MAX  = 300.0f;
 const int   POSICAO_ALVO  = 3500;
 const int   LINHA_PERDIDA_LIMIAR = 250; 
 
-// ====================================================================
+
 // 5. LIMIARES DE ERRO
-// ====================================================================
+
 const int ERRO_PEQUENO = 400;
 const int ERRO_MEDIO   = 1200;
 const int ERRO_GRANDE  = 2500;
 
-// ====================================================================
+
 // 6. RECUPERAÇÃO DE LINHA
-// ====================================================================
+
 float         ultimaDirecao     = 0.0f;
 bool          linhaPerdida      = false;
 unsigned long tempoSemLinha     = 0;
 const unsigned long MAX_TEMPO_RECUPERACAO = 400;
 
-// ====================================================================
+
 // 7. OBJETOS
-// ====================================================================
+
 QTRSensors qtr;
 uint16_t   valoresSensores[NUM_SENSORS];
 
@@ -99,16 +84,13 @@ void recuperarLinha();
 void calibrar();
 void handleSerialCommands();
 
-// ====================================================================
+
 // 8. SETUP
-// ====================================================================
+
 void setup() {
   Serial.begin(115200);
   delay(100);
 
-  Serial.println("\n========================================");
-  Serial.println("   ROBÔ LARI — SEGUIDOR DE LINHA v5.4");
-  Serial.println("========================================");
 
   // Pinos dos motores
   pinMode(PIN_AIN1, OUTPUT);
@@ -142,16 +124,16 @@ void setup() {
   integral   = 0.0f;
   erroDerivativoFiltrado = 0.0f;
 
-  // Libera a ponte H
+  // Liberando a ponte H
   digitalWrite(PIN_STBY, HIGH);
 
   Serial.println("\n>>> Pronto para o combate! Ativando motores...");
   delay(500); 
 }
 
-// ====================================================================
+
 // 9. CALIBRAÇÃO OTIMIZADA (Evita o travamento inicial)
-// ====================================================================
+
 void calibrar() {
   Serial.println("\n>>> PREPARANDO CALIBRAÇÃO...");
   Serial.println(">>> ATENÇÃO: Assim que o LED do robô piscar, mova-o lateralmente sobre a linha!");
@@ -175,9 +157,9 @@ void calibrar() {
   Serial.println(">>> Calibração concluída com sucesso!");
 }
 
-// ====================================================================
+
 // 10. LOOP PRINCIPAL
-// ====================================================================
+
 void loop() {
   uint16_t posicao = qtr.readLineBlack(valoresSensores);
 
@@ -235,7 +217,7 @@ void loop() {
   } else if (absErro < ERRO_GRANDE) {
     velBase = (int)(VELOCIDADE_BASE * 0.70f); // Curva média: Reduz 30% da velocidade base
   } else {
-    velBase = (int)(VELOCIDADE_BASE * 0.45f); // Curva fechada: Reduz 55% para dar torque de giro
+    velBase = (int)(VELOCIDADE_BASE * 0.45f); // Curva fechada: Reduz 55% para dar torque de giro bom
   }
 
   // Aplicação do sinal nos motores
@@ -251,7 +233,6 @@ void loop() {
   // Clamp final de segurança
   velEsq = constrain(velEsq, VEL_MIN_CURVA, PWM_MAX);
   velDir = constrain(velDir, VEL_MIN_CURVA, PWM_MAX);
-
 
   controlarMotores(velEsq, velDir);
 
@@ -269,9 +250,9 @@ void loop() {
 #endif
 }
 
-// ====================================================================
+
 // 11. DETECÇÃO DE LINHA
-// ====================================================================
+
 bool linhaDetectada() {
   for (uint8_t i = 0; i < NUM_SENSORS; i++) {
     if (valoresSensores[i] > LINHA_PERDIDA_LIMIAR) return true;
@@ -279,9 +260,9 @@ bool linhaDetectada() {
   return false;
 }
 
-// ====================================================================
+
 // 12. RECUPERAÇÃO DE LINHA EM CASO DE ESCAPE
-// ====================================================================
+
 void recuperarLinha() {
   if (millis() - tempoSemLinha > MAX_TEMPO_RECUPERACAO) {
     pararMotores();
@@ -296,9 +277,9 @@ void recuperarLinha() {
   }
 }
 
-// ====================================================================
+
 // 13. CONTROLE DOS MOTORES (Correção de Direção / Pontes H)
-// ====================================================================
+
 void controlarMotores(int esquerdo, int direito) {
   // Motor Esquerdo (Canal A)
   if (esquerdo >= 0) {
@@ -322,7 +303,6 @@ void controlarMotores(int esquerdo, int direito) {
     ledcWrite(CH_DIREITO, (uint32_t)abs(direito));
   }
 }
-
 void pararMotores() {
   digitalWrite(PIN_AIN1, LOW);
   digitalWrite(PIN_AIN2, LOW);
@@ -332,9 +312,9 @@ void pararMotores() {
   ledcWrite(CH_DIREITO,  0);
 }
 
-// ====================================================================
+
 // 14. AJUSTE PID POR SERIAL
-// ====================================================================
+
 void handleSerialCommands() {
   if (!Serial.available()) return;
   String cmd = Serial.readStringUntil('\n');
