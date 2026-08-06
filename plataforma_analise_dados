@@ -74,7 +74,7 @@ def mostrar_analise_rapida(df):
     axes[1].grid(alpha=0.3)
     fig.tight_layout()
     st.pyplot(fig)
-# ABA 1 — IMPORTAR DO CARTÃO SD (fluxo principal, prova real)
+# ABA 1 — IMPORTAR DO CARTÃO SD (fluxo principal
 
 with aba_sd:
     st.write(
@@ -112,7 +112,7 @@ with aba_sd:
 
 
 # ABA 2 — GRAVAR VIA USB (só bancada, não serve para a prova oficial)
-
+# ABA ANTIGA, JA ELIMINADA DO PROJETO
 with aba_usb:
     st.warning(
         "Isso só funciona com o robô preso na mesa/perto do computador, "
@@ -131,54 +131,6 @@ with aba_usb:
         kd_in = st.text_input("Kd usado (opcional)", value="")
 
     iniciar = st.button("Gravar (bancada)", type="primary")
-
-    if iniciar:
-        try:
-            import serial
-        except ImportError:
-            st.error("Falta instalar o pyserial: rode `pip install pyserial` no terminal e recarregue a página")
-            st.stop()
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        partes = [timestamp, "bancada"]
-        if label:
-            partes.append(label)
-        if kp_in:
-            partes.append(f"Kp{kp_in}")
-        if kd_in:
-            partes.append(f"Kd{kd_in}")
-        nome_arquivo = "_".join(partes) + ".csv"
-        caminho = os.path.join(DADOS_DIR, nome_arquivo)
-        status = st.empty()
-        barra = st.progress(0)
-
-        try:
-            ser = serial.Serial(porta, baud, timeout=1)
-        except Exception as e:
-            st.error(f"Não consegui abrir a porta {porta}: {e}")
-            st.stop()
-
-        time.sleep(2)
-        linhas_gravadas = 0
-        inicio = time.time()
-
-        with open(caminho, "w", newline="") as f:
-            while time.time() - inicio < duracao:
-                linha = ser.readline().decode("utf-8", errors="ignore").strip()
-                if linha:
-                    f.write(linha + "\n")
-                    linhas_gravadas += 1
-                decorrido = time.time() - inicio
-                barra.progress(min(decorrido / duracao, 1.0))
-                status.info(f"Gravando... {decorrido:.0f}s / {duracao}s — {linhas_gravadas} linhas capturadas")
-        ser.close()
-        status.success(f"Gravação concluída: {linhas_gravadas} linhas salvas em `{caminho}`")
-        try:
-            df = carregar_e_limpar(caminho)
-            st.subheader("Resultado desta corrida de bancada")
-            mostrar_analise_rapida(df)
-        except Exception as e:
-            st.warning(f"Gravação salva, mas não consegui montar a análise automaticamente: {e}")
 
 
 # ABA 3 — ANALISAR / COMPARAR
